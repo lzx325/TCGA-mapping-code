@@ -1,0 +1,119 @@
+suppressMessages(library(tidyverse))
+suppressMessages(library(foreach))
+suppressMessages(library(doParallel))
+suppressMessages(library(optparse))
+suppressMessages(library(R.utils))
+
+option_list <- list(
+  make_option(c("-w", "--workDir"), type = "character", default=FALSE,
+              help="Root location of all data and codes (workDir/anz)"),
+  make_option(c("-c", "--cancer"), type = "character", default=FALSE,
+              help="cancer type"),
+  make_option(c("-d", "--WhippletIndexjls"), type = "character", default=FALSE,
+              help="Whipplet_index_jls location")
+)
+
+opt_parser = OptionParser(option_list=option_list);
+opt = parse_args(opt_parser);
+print("options:")
+print(opt)
+stopifnot(!any(sapply(list(opt$workDir,opt$cancer,opt$WhippletIndexjls),is.null)))
+
+root_dir <- opt$workDir
+if(root_dir[length(root_dir)] != "/")
+  root_dir <- paste(root_dir,"/",sep = "")
+cancertype <- opt$cancer
+Whipplet_index_jls <- opt$WhippletIndexjls
+
+
+splitBam_rmdup_and_merge <- function(bamdir,outdir,star2pass_merged_bam.rmdup,star2pass_merged_bam_sorted.rmdup){
+
+	chr <- c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","X","Y")
+
+	stopifnot(system(paste("samtools index -@ 50 ",bamdir,sep = ""),wait = T) == 0)
+	for(index in 1:length(chr)){
+		## separate merged bam by chromosome, them sort it by name, then add MC/MS tags, then sort it by coordinate, and finally remove duplicate.
+		stopifnot(system(paste("samtools view -bh -@ 50 ",bamdir," ", chr[index],
+							   " | samtools sort -@ 50 -m 4G -n -o - ",
+							   " | samtools fixmate -@ 50 -m /dev/stdin /dev/stdout",
+							   " | samtools sort -@ 50 -m 4G -o - ",
+							   " | samtools markdup -r -s -@ 50 - ",outdir,"chr",chr[index],".chr.rmdup.bam",
+    					   sep= ""),wait = T) == 0)
+	}
+	##merge chromosome to create duplicate-removed bam
+	stopifnot(system(paste("find ",outdir,
+                           " -name '*.chr.rmdup.bam' |",
+                           " parallel -j 3 -N 4095 -m --files samtools merge - |",
+                           " parallel --xargs samtools merge -@30 ",star2pass_merged_bam.rmdup,
+                           " {}';' rm {}",
+                           sep = ""),
+                     wait = T) == 0)
+	##sort it by coordinate in case of any error
+	stopifnot(system(paste("samtools sort -@ 50 -m 4G ",star2pass_merged_bam.rmdup," > ",star2pass_merged_bam_sorted.rmdup,sep = ""),wait = T) == 0)
+	##delete unsorted rmdup
+	file.remove(star2pass_merged_bam.rrmdup)
+
+}
+
+bulid_WhippletIndex <- function(root_dir,cancertype,Whipplet_index_jls){
+  Whipplet_index <- paste(root_dir,"anz/result/",cancertype,"/06.buildWhippletIndex/",sep = "")
+  all_bam_dir <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/",sep = "")
+  star2pass_merged_bam <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.bam",sep = "")
+  # star2pass_merged_bam_name_sorted <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.name.sorted.bam",sep = "")
+  # star2pass_merged_bam_name_sorted_fixmate <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.name.sorted.fixmate.bam",sep = "")
+  # star2pass_merged_bam_coordinate_sorted <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.coordinate.sorted.bam",sep = "")
+  star2pass_merged_bam.rmdup <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.rmdup.bam",sep = "")
+  star2pass_merged_bam_sorted.rmdup <- paste(root_dir,"anz/result/",cancertype,"/05.STAR_2ndAlign/star2pass_merged.sorted.rmdup.bam",sep = "")
+  gtf <- paste(root_dir,"anz/ensembl_v97/Homo_sapiens.GRCh38.97.chr.gtf",sep = "")
+  reference_fasta <- paste(root_dir,"anz/ensembl_v97/Homo_sapiens.GRCh38.dna.primary_assembly.fa",sep = "")
+  
+    print("Start building Whipplet Index..............\n")
+    dir.create(Whipplet_index,recursive = T)
+    
+    stopifnot(system(paste("cd ",all_bam_dir,sep= "\t"),wait = T) == 0)
+    stopifnot(system(paste("find ",all_bam_dir,
+                           " -name '*rmdup.bam' |",
+                           " parallel -j 3 -N 4095 -m --files samtools merge - |",
+                           " parallel --xargs samtools merge -f -@30 ",star2pass_merged_bam,
+                           " {}';' rm {}",
+                           sep = ""),
+                     wait = T) == 0)
+    
+    
+    splitBam_rmdup_and_merge(star2pass_merged_bam,all_bam_dir,star2pass_merged_bam.rmdup,star2pass_merged_bam_sorted.rmdup)
+    # ##name sort
+    # stopifnot(system(paste("samtools sort -@ 50 -m 6G -n ",star2pass_merged_bam," > ",star2pass_merged_bam_name_sorted,sep = ""),wait = T) == 0)
+    # ##Remove unsorted merged bam file
+    # file.remove(star2pass_merged_bam)
+    # # Add ms and MC tags for markdup to use later
+    # stopifnot(system(paste("samtools fixmate -@ 50 -m ",star2pass_merged_bam_name_sorted," ",star2pass_merged_bam_name_sorted_fixmate,sep = ""),wait = T) == 0)
+    # ##Remove bam file
+    # file.remove(star2pass_merged_bam_name_sorted)
+    # # Markdup needs position order (coordinate order)
+    # stopifnot(system(paste("samtools sort -@ 50 -m 6G ",star2pass_merged_bam_name_sorted_fixmate," > ",star2pass_merged_bam_coordinate_sorted,sep = ""),wait = T) == 0)
+    # ##Remove bam file
+    # file.remove(star2pass_merged_bam_name_sorted_fixmate)
+
+    # ##rmdup
+    # stopifnot(system(paste("samtools markdup -r -s -@ 50 ",star2pass_merged_bam_coordinate_sorted," ",star2pass_merged_bam_sorted.rmdup,sep = ""),wait = T) == 0)
+    # #stopifnot(system(paste("sambamba markdup -r --hash-table-size 67108864 -t 50 -p ",star2pass_merged_bam_sorted," ",star2pass_merged_bam_sorted.rmdup,sep = ""),wait = T) == 0)
+    # ##Remove sorted merged bam file
+    # file.remove(star2pass_merged_bam_coordinate_sorted)
+
+    ##index
+    stopifnot(system(paste("samtools index -@ 50 ",star2pass_merged_bam_sorted.rmdup,sep = ""),wait = T) == 0)
+    
+    ###########
+    ##Build Whipplet Index for current cancertype
+    stopifnot(system(paste("julia ",Whipplet_index_jls, 
+                           " --fasta ",reference_fasta,
+                           " --gtf ",gtf,
+                           " --bam ",star2pass_merged_bam_sorted.rmdup,
+                           " -x ", Whipplet_index,cancertype,
+                           " --bam-both-novel ",
+                           " --bam-min-reads 10",
+                           sep = ""),wait = TRUE) == 0)
+  
+  print("Finish building Whipplet Index!!!!!!!!\n")
+}
+bulid_WhippletIndex(root_dir,cancertype,Whipplet_index_jls)

@@ -1,0 +1,7 @@
+slurm/
+_STARtmp/
+__pycache__/
+*.tmp
+core.*
+failed_list-*
+.vscode/

@@ -1,0 +1,67 @@
+########################################################################1.创建conda环境
+
+conda create -n anz
+conda activate anz
+
+#------------------------------------------------------以下是在conda环境中--------------------------------------------------------
+
+########################################################################2.安装各种R包、库，碰到需要输入y/n/all的都输入y
+
+conda install r-tidyverse
+conda install r-foreach
+conda install r-doParallel
+conda install r-optparse
+conda install r-r.utils
+conda install -c conda-forge parallel
+conda install -c maxibor samtools
+conda install -c bioconda star
+
+
+#######################################################################3.安装biopython，julia 和Whipplet v0.6.4。
+pip install biopython
+
+##如果你的环境是linux 64bit的话，就下载下面的链接
+wget https://julialang-s3.julialang.org/bin/linux/x64/0.6/julia-0.6.4-linux-x86_64.tar.gz
+##如果你的环境是linux 32bit的话，就下载下面的链接
+https://julialang-s3.julialang.org/bin/linux/x86/0.6/julia-0.6.4-linux-i686.tar.gz
+
+##然后按照说明将julia加入到环境变量里，按照下面的说明（基本是下载上面的链接，然后解压后配置环境变量就算安好了）
+https://en.wikibooks.org/wiki/Introducing_Julia/Getting_started#On_Linux
+
+##julia安完后，进入julia环境
+julia
+Pkg.add("Whippet")
+##找到whippet-index.jl和whippet-quant.jl的绝对路径，记录下来
+
+
+#####################################################################4.进入到要运行的目录 （～/run_test.sh)
+cd [~]
+
+#####################################################################5.修改run_test.sh中的参数，然后运行
+
+#*****修改第一行设置权限的目录 /home/anzheng/project/alternative_splicing/anz 改为你所在的目录 ～/anz
+
+##*****[your workdir] is ~/anz. for example if it's /Users/austin/Desktop/project/alternative_splicing/code/01.quantification_novel/anz, then [your workdir] is /Users/austin/Desktop/project/alternative_splicing/code/01.quantification_novel
+##****[-t/thread number] is recommended 10, depends on your bandwidth
+##****[-c/cancer] is one cancer type, such as "TCGA-BRCA"
+##****[-n/starIndexThread] is recommended 50
+##****[-r/starRunThread] is recommended 30
+##****[-p/starsecondParallel] is recommended 50, depends on your avaliable memory and core numbers
+##****[-q/whippletParallel] is recommended 100 or more, depends on your IO and core numbers
+##****[-d/whippletIndjl] is the absolute location of whippet-index.jl
+##****[-j/whippletQuantjl] is the absolute location of whippet-quant.jl
+
+
+#####################################################################****6.运行
+nohup bash run_test.sh &
+
+
+
+
+###################################################################################
+###################################注意事项#########################################
+###################################################################################
+0*.跑完后我的结果存在 anz/result文件夹下，这个是我最需要的。同时，我还需要～/anz/data/STAR_SJ，～/anz/data/star2pass_bam 和 ～/anz/Whipplet_index下的所有文件，我知道有的很大，到时候可以试一下能否用rsync传到我这边服务器上。
+1. gdc-user-token经常会失效，所以整个pipeline经常需要重新跑。失效的时候一般会在nohup.out里输出token invalid等字样，然后你联系我我重新下token即可。pipeline里已经对各个阶段的中断进行了处理。
+2. 如果[-t/thread number]设置10后，发现每一个sample下载的速度很慢（原本一个sample 15M/s，如果设置20个线程后速度变为1～3M/s，就相应的调低thread的值）。我感觉这个可以往10～15设置，因为这一步是下载，和star 第一次align是一起的，第一次align很快基本不费时间（5～10分钟），所以我觉得这个能设多大设多大。
+3. 程序中有另外一些软件的线程我没有给参数，直接在具体的语句中，你可以根据情况改动。例如：程序第240和250行，我可能设置的过大，或者过小。samtools merge和sort都是及其费时间的，所以这两个多线程能开多大就开多大，因为merge的bam大概能有几T到几十T，sort也是。

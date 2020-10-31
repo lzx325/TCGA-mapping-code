@@ -1,0 +1,90 @@
+suppressMessages(library(tidyverse))
+suppressMessages(library(foreach))
+suppressMessages(library(doParallel))
+suppressMessages(library(optparse))
+suppressMessages(library(R.utils))
+
+option_list <- list(
+  make_option(c("-w", "--workDir"), type = "character", default=FALSE,
+              help="Root location of all data and codes (workDir/anz)"),
+  make_option(c("-c", "--cancer"), type = "character", default=FALSE,
+              help="cancer type"),
+  make_option(c("-d", "--WhippletQuantjls"), type = "character", default=FALSE,
+              help="Whipplet_quant_jls location"),
+  make_option(c("--WhippletIndexjls"), type = "character", default=FALSE,
+              help="Whipplet_Index_jls location"),
+  make_option(c("-i", "--index"),type="integer")
+)
+
+opt_parser = OptionParser(option_list=option_list);
+opt = parse_args(opt_parser);
+print("options:")
+print(opt)
+stopifnot(!any(sapply(list(opt$workDir,opt$cancer,opt$WhippletQuantjls,opt$index),is.null)))
+root_dir <- opt$workDir
+if(root_dir[length(root_dir)] != "/")
+  root_dir <- paste(root_dir,"/",sep = "")
+cancertype <- opt$cancer
+Whipplet_quant_jls <- opt$WhippletQuantjls
+Whipplet_index_jls = opt$WhippletIndexjls
+manifest_all <- read.table(paste(root_dir,"anz/data/manifest/TCGA_all_sample_info.txt",sep = ""),
+                           sep = "\t",header = T,check.names = F,quote = "",stringsAsFactors = F)
+manifest <- manifest_all[manifest_all$cases == cancertype,]
+
+sample_number <- nrow(manifest)
+cat(sprintf("number of samples for this cancer type: %d\n",sample_number))
+cat(sprintf("current file_id: %s\n",manifest$file_id[opt$index]))
+stopifnot(1<=opt$index,opt$index<=sample_number)
+
+
+
+runWhipplet <- function(root_dir,Whipplet_index_jls,Whipplet_quant_jls,fastq1_dir, fastq2_dir = "",prefix){
+  ##create dir 
+  Whipplet_result_dir <- paste(root_dir,"anz/result",cancertype,"/07.WhippletQuant/",sep = "")
+  if(!file.exists(Whipplet_result_dir)){
+    dir.create(Whipplet_result_dir,recursive = T)
+  }
+  
+  ##run whipplet
+  julia_command <- paste("julia ",Whipplet_quant_jls, " ", fastq1_dir, " ", fastq2_dir,
+                         " -o ",prefix,
+                         " -x ",Whipplet_index_jls,
+                         " --circ",
+                         " --biascorrect",sep = "")
+  delete_file1_command <- paste("rm -f ",fastq1_dir,sep = "")
+  if(fastq2_dir != ""){
+    delete_file2_command <- paste("rm -f ",fastq2_dir,sep = "")
+    all_command <- paste(julia_command,delete_file1_command,delete_file2_command,sep =" && ")
+  }
+  else{
+    all_command <- paste(julia_command,delete_file1_command,sep =" && ")
+  }
+  cat("julia command line:\n")
+  cat(all_command,'\n')
+  stopifnot(system(all_command,wait = T) == 0)
+}
+
+data_dir <- paste(root_dir,"anz/result/",cancertype,"/02.downTCGA/",sep = "")
+log_dir <- paste(root_dir,"anz/log/",cancertype,"/07.WhippletQuant/",sep = "")
+out_dir <- paste(root_dir,"anz/result/",cancertype,"/07.WhippletQuant/",sep = "")
+if(!file.exists(log_dir)){
+  dir.create(log_dir,recursive = T)
+}
+if(!file.exists(out_dir)){
+  dir.create(out_dir,recursive = T)
+}
+log_downloaded <- paste(log_dir,"WhippletQuant.sample.log",sep = "")
+
+fastq_dir <- paste(data_dir,manifest$file_id[opt$index],sep = "")
+### reads
+fastq1 <- list.files(path=fastq_dir, pattern='_1.fastq$',full.names = T)
+fastq2 <- list.files(path=fastq_dir, pattern='_2.fastq$',full.names = T)
+outprefix <- paste(out_dir,manifest$associated_entities[opt$index],sep = "")
+if(length(fastq1) == 1 & length(fastq2) == 1){ ##paired-end
+  runWhipplet(root_dir,Whipplet_index_jls,Whipplet_quant_jls,fastq1,fastq2,outprefix)
+}else{
+  fastq <- list.files(path=fastq_dir, pattern='.fastq$',full.names = T)
+  runWhipplet(root_dir,Whipplet_index_jls,Whipplet_quant_jls,fastq1,fastq2_dir = "",outprefix)
+}
+cat(manifest$file_id[opt$index],"\n",file = log_downloaded,append =TRUE)
+        
