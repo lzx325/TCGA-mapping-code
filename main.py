@@ -312,17 +312,23 @@ if __name__=="__main__":
     batch2_remain=["TCGA-SARC"]
     batch3=["TCGA-CESC","TCGA-UCEC","TCGA-KIRP","TCGA-COAD"]
     batch4=["TCGA-BLCA","TCGA-LIHC","TCGA-SKCM","TCGA-ESCA","TCGA-PRAD","TCGA-LUAD"]
-    if len(sys.argv)>=2 and sys.argv[1]=="run":
-        for cancer in batch3[0:2]:
-            # step2(cancer)
-            # step6(cancer,time=3,n_cpus=16)
-            # step5(cancer,time=1,n_cpus=16)
-            # step3(cancer)
-            step4(cancer)
-            # step7(cancer, time=5, n_cpus=8)
-
+    if len(sys.argv)>=3 and sys.argv[1]=="run":
+        for cancer in batch3[2:3]:
+            step=int(sys.argv[2])
+            if step==2:
+                step2(cancer)
+            elif step==3:
+                step3(cancer)
+            elif step==4:
+                step4(cancer)
+            elif step==5:
+                step5(cancer,time=1,n_cpus=16)
+            elif step==6:
+                step6(cancer,time=3,n_cpus=16)
+            elif step==7:
+                step7(cancer, time=5, n_cpus=8)
     else:
-        glob_name(batch3[0:2])
+        glob_name(batch3[2:3])
         
 
     # glob_name(batch3)
